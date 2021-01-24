@@ -19,5 +19,5 @@ from upload import views
 urlpatterns = [
     # simple message
     path('api/message', views.Message),
-    path('api/people', views.People),
+    path('api/progress', views.progress),
 ]
