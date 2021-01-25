@@ -75,14 +75,14 @@ def query_1(client):
     return ppl
 
 
-@api_view(['GET'])
+@api_view(['GET','POST'])
 def Message(request):
     '''
     returns the message for demo
     '''
-    message = request.query_params.get('message', 'creating_api in')
-    d1 = {'message': message}
-    return Response(d1)
+    data = request.data
+    # d1 = {'message': message}
+    return Response(data)
 
 
 def work_items_objects(items):
@@ -142,14 +142,31 @@ def jira_object_work(objects, JiraIssue):
   return work_done
 
 
-def progress_report(WorkProgress, JiraIssue):
+def check_ispartof(WorkProgress, work_id):
   '''
-  Return the prohgress with
-  there work id
+  Check whether the given workItem
+  is present in project , task or subtask
   '''
+  if(WorkProgress['WorkItem.id'] in work_id):
+    return True
+  else:
+    for task in WorkProgress['WorkItem.associated_work_items']:
+      if(task['WorkItem.id'] in work_id):
+        return True
+      else:
+        for sub_task in task['WorkItem.associated_work_items']:
+          if(sub_task['WorkItem.id'] in work_id):
+            return True
+    return False
 
+
+def progress_report(WorkProgress, JiraIssue, work_ids):
   final_progress = {}
+  current_length=0
+  length=len(work_ids)
   for per_project in WorkProgress:
+    if(check_ispartof(per_project, work_ids) == False):
+      continue
     all_task = per_project['WorkItem.associated_work_items']
     for task in all_task:
       my_task = task
@@ -159,13 +176,13 @@ def progress_report(WorkProgress, JiraIssue):
         sub = subt
         objects = sub['WorkItem.associated_objects']
         work_done = jira_object_work(objects, JiraIssue)
-        final_progress[sub['WorkItem.id']] = int(work_done)
+        if(sub['WorkItem.id'] in work_ids):
+          final_progress[sub['WorkItem.id']] = int(work_done)
+          current_length += 1
+        if(current_length == length):
+          return final_progress
         start_date = sub['WorkItem.start_date'][0:10]
         end_date = sub['WorkItem.end_date'][0:10]
-        date_format = "%Y-%m-%d"
-        a = datetime.strptime(start_date, date_format)
-        b = datetime.strptime(end_date, date_format)
-        delta = b - a
         date_diff = diff_date(start_date, end_date)
         overall_sub_task_work += (work_done*date_diff)
         total_work_done_task = overall_sub_task_work/100
@@ -173,22 +190,35 @@ def progress_report(WorkProgress, JiraIssue):
       task_end_date = my_task['WorkItem.end_date'][0:10]
       task_date_diff = diff_date(task_start_date, task_end_date)
       task_work_done=ceil(total_work_done_task/task_date_diff*100)
-      final_progress[my_task['WorkItem.id']] = int(task_work_done)
+      if(my_task['WorkItem.id'] in work_ids):
+        final_progress[my_task['WorkItem.id']] = int(task_work_done)
+        current_length += 1
+      if(current_length == length):
+        return final_progress
     project_start_date = per_project['WorkItem.start_date'][0:10]
     project_end_date = per_project['WorkItem.end_date'][0:10]
     project_date_diff = diff_date(project_start_date,project_end_date)
-    final_progress[per_project['WorkItem.id']] = ceil(overall_sub_task_work/project_date_diff)
+    if(per_project['WorkItem.id'] in work_ids):
+      final_progress[per_project['WorkItem.id']] = ceil(overall_sub_task_work/project_date_diff)
+      current_length += 1
+    if(current_length == length):
+      return final_progress
     return final_progress
 
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 def progress(request):
     '''
     Show the percentage of work id
     with there complete percentage
     '''
 
-    ppl = query_1(client)
-    WorkProgress, JiraIssue = work_items_objects(ppl)
-    final_progres = progress_report(WorkProgress, JiraIssue)
+    all_data = query_1(client)
+    try:
+        work_id = request.data['work_id']
+    except KeyError:
+        work_id = request.data
+
+    WorkProgress, JiraIssue = work_items_objects(all_data)
+    final_progres = progress_report(WorkProgress, JiraIssue, work_id)
     return Response(final_progres)
